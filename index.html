@@ -156,12 +156,12 @@ function vImport() {
   <li>아래에서 그 파일을 고르고 앱 비밀번호를 정하세요. 서명키는 이 비밀번호로 잠가 이 휴대폰 안에만 둡니다.</li>
   <li>넣은 뒤 휴대폰에 남은 private_key.pem 파일(다운로드 폴더, 대화방)은 지우세요.</li></ol>
   <label class="f">private_key.pem</label><input id="pf" type="file" accept=".pem,application/x-pem-file,text/plain,*/*">
-  <label class="f">앱 비밀번호(10자 이상, 잊으면 서명키를 다시 넣어야 함)</label><input id="p1" type="password" autocomplete="new-password">
+  <label class="f">앱 비밀번호(8자 이상, 잊으면 서명키를 다시 넣어야 함)</label><input id="p1" type="password" autocomplete="new-password">
   <label class="f">한 번 더</label><input id="p2" type="password" autocomplete="new-password">
   <button class="btn w" style="margin-top:14px" id="bImp">넣기</button><div id="im" class="msg err"></div></div>`;
   $('#bImp').onclick = async () => { const m = $('#im'); m.textContent = ''; try {
     const f = $('#pf').files[0]; if (!f) throw new Error('private_key.pem 파일을 고르세요.');
-    const pw = $('#p1').value; if (pw.length < 10) throw new Error('앱 비밀번호는 10자 이상으로 정하세요.'); if (pw !== $('#p2').value) throw new Error('두 비밀번호가 다릅니다.');
+    const pw = $('#p1').value; if (pw.length < 8) throw new Error('앱 비밀번호는 8자 이상으로 정하세요.'); if (pw !== $('#p2').value) throw new Error('두 비밀번호가 다릅니다.');
     const seed = pemSeed(await f.text()); useSeed(seed); $('#bImp').disabled = true; $('#bImp').textContent = '잠그는 중...'; await saveSeed(seed, pw); S.tab = sheetConf() ? 'issue' : 'set'; boot();
   } catch (e) { m.textContent = e.message; $('#bImp').disabled = false; $('#bImp').textContent = '넣기'; } };
 }
@@ -331,13 +331,13 @@ function vSet() {
   ${ob.length ? `<div class="hint">${ob.slice(0, 20).map(r => `${esc(r.발급일시)} ${esc(r.이름)} ${esc(r.기능)}`).join('<br>')}</div>` : ''}
   <div style="display:flex;gap:8px;margin-top:10px"><button class="btn sec" style="flex:1" id="bFl">지금 보내기</button><button class="btn sec" style="flex:1" id="bEx">이 휴대폰 발급 기록 복사</button></div><div id="flm" class="msg"></div></div>
   <div class="card"><b>서명키</b><div class="hint" style="margin:6px 0">넣은 날 ${esc(k.at || '-')} · 공개키가 공무노트 프로그램과 같은지 확인됨</div>
-  <label class="f">앱 비밀번호 바꾸기 — 새 비밀번호(10자 이상)</label><input id="np" type="password" autocomplete="new-password"><button class="btn sec w" style="margin-top:8px" id="bNp">바꾸기</button>
+  <label class="f">앱 비밀번호 바꾸기 — 새 비밀번호(8자 이상)</label><input id="np" type="password" autocomplete="new-password"><button class="btn sec w" style="margin-top:8px" id="bNp">바꾸기</button>
   <button class="btn red w" style="margin-top:14px" id="bDel">이 휴대폰에서 서명키 지우기</button><div id="km" class="msg"></div>
   <p class="hint">휴대폰을 바꾸거나 팔 때는 먼저 [서명키 지우기]를 누르세요. 휴대폰을 잃어버렸어도 앱 비밀번호 없이는 서명키를 꺼낼 수 없습니다.</p></div>`;
   $('#bSc').onclick = async () => { const m = $('#scm'); m.className = 'msg'; m.textContent = '확인 중...'; try { const conf = parseSheet($('#sc').value); const d = await callSheet({ action: 'ping' }, conf); store.set(LS.sheet, conf); m.className = 'msg ok'; m.textContent = `연결했습니다(시트: ${d.sheet}).`; S.rows = null; flush(); } catch (e) { m.className = 'msg err'; m.textContent = e.message; } };
   $('#bFl').onclick = async () => { await flush(); $('#flm').className = S.syncErr ? 'msg err' : 'msg ok'; $('#flm').textContent = S.syncErr || `남은 대기 ${store.get(LS.out, []).length}건`; };
   $('#bEx').onclick = () => { const h = store.get(LS.hist, []); copyText(h.map(r => ['발급일시', '이름', 'PC 번호', '기능', '구분', '만료일', '한도', '사용 키', '기록ID'].map(c => r[c] ?? '').join('\t')).join('\n')); $('#flm').className = 'msg ok'; $('#flm').textContent = `이 휴대폰에서 만든 기록 ${h.length}건을 복사했습니다(엑셀에 붙여 넣으면 칸이 나뉨).`; };
-  $('#bNp').onclick = async () => { const p = $('#np').value, m = $('#km'); if (p.length < 10) { m.className = 'msg err'; m.textContent = '10자 이상으로 정하세요.'; return; } await saveSeed(SEED, p); $('#np').value = ''; m.className = 'msg ok'; m.textContent = '앱 비밀번호를 바꿨습니다.'; };
+  $('#bNp').onclick = async () => { const p = $('#np').value, m = $('#km'); if (p.length < 8) { m.className = 'msg err'; m.textContent = '8자 이상으로 정하세요.'; return; } await saveSeed(SEED, p); $('#np').value = ''; m.className = 'msg ok'; m.textContent = '앱 비밀번호를 바꿨습니다.'; };
   $('#bDel').onclick = () => { if (!confirm('이 휴대폰에서 서명키를 지울까요? 다시 쓰려면 private_key.pem을 다시 넣어야 합니다.\n(구글 시트 기록과 대표 PC의 서명키는 그대로입니다)')) return; localStorage.removeItem(LS.key); lock(); };
 }
 boot();
