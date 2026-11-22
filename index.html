@@ -58,7 +58,7 @@ ol.steps{padding-left:18px;margin:6px 0}ol.steps li{margin:4px 0}
 const PUB_B64 = 'BErGZM1huNzfiOwz5nKg8pNcaESLVgOQWZCE+BYnVWs=';   // services/license_pub.py — 다른 서명키를 넣으면 막는다
 const PREFIX = 'GN1', LS = { key: 'gm_signkey_v1', sheet: 'gm_sheet_v1', out: 'gm_outbox_v1', hist: 'gm_history_v1' };
 const FEAT = { '1': ['L', '일용직 노임대장'], '2': ['G', '고용산재 산출기'], '3': ['LG', '전체(노임대장 + 고용산재)'] };
-const LOCK_MS = 5 * 60 * 1000, NEAR = 30;
+const LOCK_MS = 60 * 60 * 1000, AWAY_MS = 60 * 60 * 1000, NEAR = 30;   // [261122] 잠금: 1시간 안 쓰거나 다른 앱에 1시간 넘게 나가 있으면(예전 5분, 2분)
 const $ = s => document.querySelector(s), esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const enc = new TextEncoder(), dec = new TextDecoder();
 const store = { get: (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }, set: (k, v) => localStorage.setItem(k, JSON.stringify(v)) };
@@ -114,7 +114,7 @@ function useSeed(seed) { const kp = nacl.sign.keyPair.fromSeed(seed); if (b64(kp
 function lock() { if (KP) { KP.secretKey.fill(0); } if (SEED) SEED.fill(0); SEED = KP = null; boot(); }
 setInterval(() => { if (KP && Date.now() - lastAct > LOCK_MS) lock(); }, 15000);
 ['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, () => lastAct = Date.now(), true));
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') S.hiddenAt = Date.now(); else if (KP && S.hiddenAt && Date.now() - S.hiddenAt > 2 * 60 * 1000) lock(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') S.hiddenAt = Date.now(); else if (KP && S.hiddenAt && Date.now() - S.hiddenAt > AWAY_MS) lock(); });
 
 // ── 구글 시트(덧붙이기만, 보내기 실패 시 휴대폰에 보관했다가 자동으로 다시) ──
 const sheetConf = () => store.get(LS.sheet, null);
@@ -168,7 +168,7 @@ function vImport() {
 function vUnlock() {
   $('#app').innerHTML = `<div class="card center"><h3 style="margin-top:0">앱 비밀번호</h3><input id="pw" type="password" autocomplete="current-password">
   <button class="btn w" style="margin-top:14px" id="bUn">열기</button><div id="um" class="msg err"></div>
-  <p class="hint">5분 동안 쓰지 않거나 다른 앱으로 2분 넘게 나가 있으면 다시 잠깁니다.</p></div>`;
+  <p class="hint">1시간 동안 쓰지 않거나 다른 앱으로 1시간 넘게 나가 있으면 다시 잠깁니다.</p></div>`;
   const go = async () => { $('#bUn').disabled = true; $('#bUn').textContent = '여는 중...'; try { useSeed(await openSeed($('#pw').value)); boot(); } catch (e) { $('#um').textContent = e.message; $('#bUn').disabled = false; $('#bUn').textContent = '열기'; } };
   $('#bUn').onclick = go; $('#pw').onkeydown = e => { if (e.key === 'Enter') go(); }; setTimeout(() => $('#pw').focus(), 50);
 }
@@ -182,9 +182,19 @@ function render() {
 }
 
 // ── 키 발급 ──
+// [261122] 휴대폰에서 끝까지 드래그하지 못해 요청 글 앞부분([공무노트 사용 키 요청], PC 번호: 등)이 잘려도 PC 번호를 읽는다.
+// 붙임표 대신 띄어쓰기여도 읽고, PC 번호 자체가 잘렸으면 ''(엉뚱한 번호로 키를 만들지 않게).
+function findMid(raw, L) {
+  const up = String(raw || '').toUpperCase();
+  const m = up.match(/[A-Z2-7]{4}-[A-Z2-7]{4}-[A-Z2-7]{4}-[A-Z2-7]{4}/) || up.match(/(?<![A-Z0-9])[A-Z2-7]{4}(?:[-\s]?[A-Z2-7]{4}){3}(?![A-Z0-9])/);
+  if (m) return normMid(m[0]);
+  const lm = up.match(/PC\s*번호\s*[:：]\s*([^\r\n]*)/);
+  const v = normMid(lm ? lm[1].split(new RegExp(L))[0] : (new RegExp(L).test(raw) ? '' : up));
+  return v.length === 16 ? v : '';
+}
 function parseReq(raw) {
   raw = raw || ''; const L = '(?:\\[공무노트 사용 키 요청\\]|PC\\s*번호\\s*[:：]|회사\\s*이름\\s*[:：]|사용권\\s*계약\\s*동의\\s*[:：])';
-  const m = raw.toUpperCase().match(/[A-Z2-7]{4}-[A-Z2-7]{4}-[A-Z2-7]{4}-[A-Z2-7]{4}/); const mid = normMid(m ? m[0] : raw);
+  const mid = findMid(raw, L);
   let co = ''; const cm = raw.match(new RegExp('회사\\s*이름\\s*[:：]\\s*(.*?)\\s*(?=' + L + '|[\\r\\n]|$)')); if (cm) co = cm[1].trim();
   const tm = raw.match(/사용권\s*계약\s*동의\s*[:：]\s*(v[\d.]+\s*\([^)]*\))\s*([^\r\n]*)/); const terms = tm ? tm[1].trim() : '';
   if (tm && !cm) co = tm[2].split(new RegExp(L))[0].trim();
@@ -195,7 +205,7 @@ function keepIss() { ['req', 'name', 'period', 'seats', 'limit', 'contact', 'mem
 function vIssue() {
   const i = S.iss;
   $('#m').innerHTML = `<div class="card"><label class="f" style="margin-top:0">사용자가 보낸 요청 글(또는 PC 번호)</label>
-  <textarea id="i_req" placeholder="[공무노트 사용 키 요청] 글을 그대로 붙여 넣으세요">${esc(i.req || '')}</textarea><div id="i_read" class="hint"></div>
+  <textarea id="i_req" placeholder="받은 요청 글을 붙여 넣으세요. 맨 앞 몇 글자가 빠져도 PC 번호 줄부터 있으면 읽습니다">${esc(i.req || '')}</textarea><div id="i_read" class="hint"></div>
   <label class="f">이름(사용권 계약에 동의한 회사 이름)</label><input id="i_name" value="${esc(i.name || '')}">
   <label class="f">기능</label>${seg('feat', [['1', '노임대장'], ['2', '고용산재'], ['3', '전체']])}
   <label class="f">구분</label>${seg('kind', [['trial', '체험'], ['paid', '유료']])}
@@ -211,7 +221,7 @@ function vIssue() {
     if (k === 'tier' && ['5', '10', '30', ''].includes(S.iss.limit)) S.iss.limit = v === 'site' ? '5' : '10'; vIssue(); });
   const rd = () => { const v = $('#i_req').value; if (!v.trim()) { $('#i_read').textContent = ''; return; } const d = parseReq(v);
     if (d.mid.length === 16) { $('#i_read').textContent = `읽은 내용 — PC 번호 ${fmtMid(d.mid)} / 회사 이름 ${d.co || '(없음 — 이름을 넣으세요)'}`; if (d.co && (!$('#i_name').value.trim() || $('#i_name').value === S.autoName)) { $('#i_name').value = d.co; S.autoName = d.co; } }
-    else $('#i_read').textContent = 'PC 번호(16자리)를 아직 찾지 못했습니다.'; };
+    else $('#i_read').textContent = /회사\s*이름|계약\s*동의/.test(v) ? 'PC 번호가 잘린 것 같습니다. PC 번호 줄이 다 들어가게 다시 복사해 주세요(맨 앞 [공무노트 사용 키 요청]은 빠져도 됩니다).' : 'PC 번호(16자리)를 아직 찾지 못했습니다.'; };
   $('#i_req').addEventListener('input', rd); if (i.req) rd();
   $('#bIss').onclick = doIssue;
 }
