@@ -57,13 +57,16 @@ ol.steps{padding-left:18px;margin:6px 0}ol.steps li{margin:4px 0}
 // 사용 키 형식은 services/license.py encode_key와 같다: "GN1." + base64url(정렬한 JSON) + "." + base64url(Ed25519 서명("GN1." + JSON))
 const PUB_B64 = 'BErGZM1huNzfiOwz5nKg8pNcaESLVgOQWZCE+BYnVWs=';   // services/license_pub.py — 다른 서명키를 넣으면 막는다
 const PREFIX = 'GN1', LS = { key: 'gm_signkey_v1', sheet: 'gm_sheet_v1', out: 'gm_outbox_v1', hist: 'gm_history_v1' };
-const FEAT = { '1': ['L', '일용직 노임대장'], '2': ['G', '고용산재 산출기'], '3': ['LG', '전체(노임대장 + 고용산재)'], '4': ['GV', '고용산재 산출기 + 거래처 업종 찾기'], '5': ['LGV', '전체 + 거래처 업종 찾기'] };
+// [261124] 기능은 세 단추를 골라 담기(중복 선택) — 업종 찾기(V)는 고용산재(G) 안의 기능이라 V를 켜면 G도 함께
+const FEAT_PARTS = [['L', '일용직 노임대장'], ['G', '고용산재 산출기'], ['V', '거래처 업종 찾기']];
+const featName = c => FEAT_PARTS.filter(([x]) => c.includes(x)).map(([, t]) => t).join(' + ');
+function featOf(t) { t = String(t || ''); let s = ''; if (/노임대장|전체/.test(t)) s += 'L'; if (/고용산재|전체|업종 찾기/.test(t)) s += 'G'; if (/업종 찾기/.test(t)) s += 'V'; return s || 'L'; }
 const LOCK_MS = 60 * 60 * 1000, AWAY_MS = 60 * 60 * 1000, NEAR = 30;   // [261122] 잠금: 1시간 안 쓰거나 다른 앱에 1시간 넘게 나가 있으면(예전 5분, 2분)
 const $ = s => document.querySelector(s), esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const enc = new TextEncoder(), dec = new TextDecoder();
 const store = { get: (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }, set: (k, v) => localStorage.setItem(k, JSON.stringify(v)) };
 let SEED = null, KP = null, lastAct = Date.now();
-let S = { tab: 'issue', filter: 'all', q: '', sk: null, sd: 1, rows: null, iss: { feat: '1', kind: 'trial', tier: 'site', period: '30', limit: '5', seats: '0' } };
+let S = { tab: 'issue', filter: 'all', q: '', sk: null, sd: 1, rows: null, iss: { feat: 'L', kind: 'trial', tier: 'site', period: '30', limit: '5', seats: '0' } };
 
 // ── 글자, 날짜 ──
 const b64 = u8 => btoa(String.fromCharCode(...u8));
@@ -207,7 +210,7 @@ function vIssue() {
   $('#m').innerHTML = `<div class="card"><label class="f" style="margin-top:0">사용자가 보낸 요청 글(또는 PC 번호)</label>
   <textarea id="i_req" placeholder="받은 요청 글을 붙여 넣으세요. 맨 앞 몇 글자가 빠져도 PC 번호 줄부터 있으면 읽습니다">${esc(i.req || '')}</textarea><div id="i_read" class="hint"></div>
   <label class="f">이름(사용권 계약에 동의한 회사 이름)</label><input id="i_name" value="${esc(i.name || '')}">
-  <label class="f">기능</label>${seg('feat', [['1', '노임대장'], ['2', '고용산재'], ['3', '전체'], ['4', '고용산재 + 업종 찾기'], ['5', '전체 + 업종 찾기']])}
+  <label class="f">기능 <span class="hint" style="display:inline">해당하는 것만 누르기(여러 개)</span></label><div class="seg">${[['L', '노임대장'], ['G', '고용산재'], ['V', '업종 찾기']].map(([c, t]) => `<button type="button" class="${(i.feat || '').includes(c) ? 'on' : ''}" data-feat="${c}">${t}</button>`).join('')}</div>
   <label class="f">구분</label>${seg('kind', [['trial', '체험'], ['paid', '유료']])}
   <label class="f">판매 대상</label>${seg('tier', [['site', '건설사(월 활성 현장 수)'], ['co', '노무법인(월 활성 건설사 수)']])}
   <div class="row"><div><label class="f">사용 기간(일수 또는 만료일, 0 = 제한 없음)</label><input id="i_period" value="${esc(i.period)}"></div>
@@ -216,6 +219,9 @@ function vIssue() {
   <div><label class="f">연락처(선택)</label><input id="i_contact" value="${esc(i.contact || '')}"></div></div>
   <label class="f">메모(선택)</label><input id="i_memo" value="${esc(i.memo || '')}">
   <button class="btn w" style="margin-top:16px" id="bIss">키 만들기</button><div id="i_msg" class="msg"></div><div id="i_out"></div></div>`;
+  document.querySelectorAll('[data-feat]').forEach(b => b.onclick = () => { keepIss(); const c = b.dataset.feat, s = new Set((S.iss.feat || '').split(''));
+    if (s.has(c)) s.delete(c); else s.add(c); if (c === 'V' && s.has('V')) s.add('G'); if (c === 'G' && !s.has('G')) s.delete('V');
+    S.iss.feat = ['L', 'G', 'V'].filter(x => s.has(x)).join(''); vIssue(); });
   document.querySelectorAll('[data-seg]').forEach(b => b.onclick = () => { keepIss(); const k = b.dataset.seg, v = b.dataset.v; S.iss[k] = v;
     if (k === 'kind' && ['30', '365', ''].includes(S.iss.period)) S.iss.period = v === 'trial' ? '30' : '365';
     if (k === 'tier' && ['5', '10', '30', ''].includes(S.iss.limit)) S.iss.limit = v === 'site' ? '5' : '10'; vIssue(); });
@@ -235,7 +241,8 @@ function doIssue() {
       name = r.co; S.iss.name = name; $('#i_name').value = name;
     }
     const exp = parsePeriod(i.period), seats = /^\d+$/.test(i.seats) ? +i.seats : 0, lim = /^\d+$/.test(i.limit) ? +i.limit : 0;
-    const [feats, fname] = FEAT[i.feat], kind = i.kind === 'paid' ? 'paid' : 'trial', tier = i.tier === 'co' ? 'co' : 'site';
+    const feats = /^[LGV]+$/.test(i.feat || '') ? i.feat : '', fname = featName(feats); if (!feats) throw new Error('기능을 하나 이상 고르세요(노임대장, 고용산재, 업종 찾기).');
+    const kind = i.kind === 'paid' ? 'paid' : 'trial', tier = i.tier === 'co' ? 'co' : 'site';
     const key = makeKey(r.mid, name, feats, exp, seats, kind, tier, lim);
     const expTxt = exp ? `${exp.slice(0, 4)}-${exp.slice(4, 6)}-${exp.slice(6)}` : '제한 없음', limTxt = tierText(tier, lim);
     keepRecord({ '발급일시': nowTxt(), '이름': name, 'PC 번호': r.mid, '기능': fname, '구분': kind === 'trial' ? '체험' : '유료', '만료일': expTxt, '공유 대수': String(seats), '한도': limTxt,
@@ -316,7 +323,7 @@ function openRow(r) {
   <button class="btn sec w" style="margin-top:8px" id="eX">닫기</button></div>`;
   document.body.appendChild(el); const close = () => el.remove(); el.onclick = e => { if (e.target === el) close(); }; el.querySelector('#eX').onclick = close;
   el.querySelector('#eC').onclick = () => { copyText(r['사용 키']); el.querySelector('#eC').textContent = '복사했습니다'; };
-  if (!r.재설정) el.querySelector('#eR').onclick = () => { const f = { '일용직 노임대장': '1', '고용산재 산출기': '2', '고용산재 산출기 + 거래처 업종 찾기': '4', '전체 + 거래처 업종 찾기': '5' }[r.기능] || '3', lm = (String(r.한도).match(/(\d+)/) || [])[1] || '0';
+  if (!r.재설정) el.querySelector('#eR').onclick = () => { const f = featOf(r.기능), lm = (String(r.한도).match(/(\d+)/) || [])[1] || '0';
     S.iss = { ...S.iss, req: r['PC 번호'], name: r.이름, feat: f, kind: r.구분 === '유료' ? 'paid' : 'trial', tier: /건설사/.test(r.한도) ? 'co' : 'site', limit: lm, seats: String(r['공유 대수'] || '0'), period: r.구분 === '유료' ? '365' : '30', contact: r.연락처 || '', memo: '' };
     close(); S.tab = 'issue'; render(); };
 }
